@@ -1,0 +1,6 @@
+{
+  "name": "Al-Waha Market",
+  "description": "Al-Waha Market (متجر الواحة) - A complete app store and entertainment marketplace with five tabs (Apps, Games, Books, Movies, Music), local download managers, media engines, and an AI-powered smart application discovery assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
