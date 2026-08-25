@@ -11,6 +11,7 @@ import com.example.data.database.MarketplaceRepository
 import com.example.data.database.MarketplaceRepositoryImpl
 import com.example.data.datastore.BookPreferences
 import com.example.data.datastore.SearchPreferences
+import com.example.data.telemetry.Telemetry
 
 /**
  * Phase 1.1: Manual DI container (Hilt alternative without Gradle plugin classpath issues).
@@ -37,6 +38,8 @@ class AppContainer(private val context: Context) {
 
     val searchPreferences: SearchPreferences by lazy { SearchPreferences(context.applicationContext) }
     val bookPreferences: BookPreferences by lazy { BookPreferences(context.applicationContext) }
+    val chatDao by lazy { database.chatDao() }
+    val telemetry: Telemetry by lazy { Telemetry(context.applicationContext) }
 
     val geminiService: GeminiApiService by lazy { RetrofitClient.service }
 }

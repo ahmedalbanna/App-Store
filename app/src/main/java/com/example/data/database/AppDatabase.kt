@@ -7,22 +7,36 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [MarketplaceItem::class], version = 2, exportSchema = false)
+@Database(entities = [MarketplaceItem::class, ChatMessageEntity::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun marketplaceDao(): MarketplaceDao
+    abstract fun chatDao(): ChatDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
-        // Phase 1.4: explicit migration 1->2 adds indices; for now a simple no-op migration
-        // since indices are created automatically by Room, but we keep a Migration object
-        // to avoid fallbackToDestructiveMigration and preserve user library/bookmarks.
+        // Phase 1.4: explicit migration 1->2 adds indices
         val MARKETPLACE_DB_MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Create indices if not exists (Room will create them, but ensure for existing DBs)
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_marketplace_items_type` ON `marketplace_items` (`type`)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_marketplace_items_downloadState` ON `marketplace_items` (`downloadState`)")
+            }
+        }
+
+        // Phase 3.3: 2->3 adds chat_messages table
+        val MARKETPLACE_DB_MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `chat_messages` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `sender` TEXT NOT NULL,
+                        `text` TEXT NOT NULL,
+                        `timestamp` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
             }
         }
 
@@ -33,7 +47,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "alwaha_marketplace_db"
                 )
-                    .addMigrations(MARKETPLACE_DB_MIGRATION_1_2)
+                    .addMigrations(MARKETPLACE_DB_MIGRATION_1_2, MARKETPLACE_DB_MIGRATION_2_3)
                     .build()
                 INSTANCE = instance
                 instance
@@ -42,5 +56,6 @@ abstract class AppDatabase : RoomDatabase() {
     }
 }
 
-// Expose migration for Hilt module
+// Expose migrations for AppContainer
 val MARKETPLACE_DB_MIGRATION_1_2 = AppDatabase.MARKETPLACE_DB_MIGRATION_1_2
+val MARKETPLACE_DB_MIGRATION_2_3 = AppDatabase.MARKETPLACE_DB_MIGRATION_2_3

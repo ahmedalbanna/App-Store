@@ -18,7 +18,9 @@ class MainActivity : ComponentActivity() {
                 val viewModel: com.example.ui.viewmodel.MarketplaceViewModel = viewModel(
                     factory = com.example.ui.viewmodel.MarketplaceViewModel.provideFactory(
                         app.container.marketplaceRepository,
-                        app.container.searchPreferences
+                        app.container.searchPreferences,
+                        app.container.chatDao,
+                        app.container.telemetry
                     )
                 )
                 MarketplaceMainScreen(viewModel = viewModel)

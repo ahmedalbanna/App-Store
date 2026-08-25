@@ -6,9 +6,14 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -44,7 +49,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -1645,19 +1652,39 @@ fun MusicPlayerScreen(viewModel: MarketplaceViewModel) {
     }
 }
 
-// ---------------- 4. SMART GEMINI AI ASSISTANT CHAT SCREEN (مساعد الذكاء الاصطناعي الأندلسي) ----------------
+// ---------------- 4. SMART GEMINI AI ASSISTANT CHAT SCREEN (مساعد الواحة الذكي — Phase 3 RAG + persist + telemetry) ----------------
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiAssistantScreen(viewModel: MarketplaceViewModel) {
     val messages by viewModel.chatMessages.collectAsState()
     val isChatLoading by viewModel.isChatLoading.collectAsState()
     var inputQuery by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Auto scroll to bottom on new message
+    LaunchedEffect(messages.size, isChatLoading) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    val suggestedChips = listOf(
+        "تطبيق للأذكار",
+        "كتاب تاريخ",
+        "لعبة استراتيجية",
+        "فيلم وثائقي",
+        "موسيقى هادئة"
+    )
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // Welcome Sparkles
+        // Header with clear + telemetry opt-in
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1673,31 +1700,84 @@ fun AiAssistantScreen(viewModel: MarketplaceViewModel) {
                 modifier = Modifier.size(28.dp)
             )
             Spacer(modifier = Modifier.width(10.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "مساعد الواحة الذكي (Gemini)",
+                    text = "مساعد الواحة الذكي (Gemini + RAG)",
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "استكشف واقترح تطبيقات ومحتويات مناسبة لصوتك وذوقك مباشرة بالذكاء الاصطناعي.",
+                    text = "RAG يسترجع من كتالوج الواحة المحلي ثم يستدعي Gemini. المحادثة محفوظة محلياً.",
                     fontSize = 10.sp,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
                 )
             }
+            IconButton(
+                onClick = { viewModel.clearChatHistory() },
+                modifier = Modifier.semantics { contentDescription = "مسح المحادثة" }
+            ) {
+                Icon(Icons.Filled.DeleteSweep, contentDescription = "مسح المحادثة", tint = MaterialTheme.colorScheme.primary)
+            }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // History list
+        // Telemetry opt-in (Phase 3.4) — small switch, no PII, default off
+        val isTelemetryOptedIn by viewModel.isTelemetryOptedIn.collectAsState()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "تحسين التجربة (مجهول)",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+            Switch(
+                checked = isTelemetryOptedIn,
+                onCheckedChange = { viewModel.setTelemetryOptIn(it) },
+                modifier = Modifier.testTag("telemetry_switch")
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Suggested chips (Phase 3.3)
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp)
+        ) {
+            items(suggestedChips) { chip ->
+                AssistChip(
+                    onClick = {
+                        inputQuery = chip
+                        viewModel.sendChatMessage(chip)
+                        inputQuery = ""
+                    },
+                    label = { Text(chip, fontSize = 12.sp) },
+                    leadingIcon = { Icon(Icons.Filled.Lightbulb, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    modifier = Modifier.testTag("suggested_chip_${chip}")
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // History list — persists via Room (Phase 3.3), auto-scroll
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = PaddingValues(vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            reverseLayout = false
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(messages) { msg ->
                 val isUser = msg.sender == "USER"
@@ -1713,22 +1793,49 @@ fun AiAssistantScreen(viewModel: MarketplaceViewModel) {
                             bottomEnd = if (isUser) 4.dp else 16.dp
                         ),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isUser) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            }
+                            containerColor = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
                         ),
                         modifier = Modifier
                             .fillMaxWidth(0.85f)
                             .testTag("chat_msg_${msg.sender}")
                     ) {
-                        Text(
-                            text = msg.text,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(12.dp)
-                        )
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = msg.text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface
+                            )
+                            if (!isUser) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(
+                                        onClick = {
+                                            clipboardManager.setText(AnnotatedString(msg.text))
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Icon(Icons.Filled.ContentCopy, contentDescription = "نسخ", modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("نسخ", fontSize = 11.sp)
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            val sendIntent = Intent().apply {
+                                                action = Intent.ACTION_SEND
+                                                putExtra(Intent.EXTRA_TEXT, msg.text)
+                                                type = "text/plain"
+                                            }
+                                            context.startActivity(Intent.createChooser(sendIntent, "مشاركة"))
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Share, contentDescription = "مشاركة", modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("مشاركة", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1746,12 +1853,24 @@ fun AiAssistantScreen(viewModel: MarketplaceViewModel) {
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "جاري تجميع الأفكار من فضاء الواحة...",
+                            text = "جاري التجميع مع RAG من كتالوج الواحة...",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
                         )
                     }
                 }
+            }
+        }
+
+        // Retry bar if last was AI and not loading
+        if (!isChatLoading && messages.isNotEmpty() && messages.last().sender == "AI") {
+            TextButton(
+                onClick = { viewModel.retryLastMessage() },
+                modifier = Modifier.align(Alignment.End).testTag("chat_retry_btn")
+            ) {
+                Icon(Icons.Filled.Refresh, contentDescription = "إعادة", modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("إعادة المحاولة", fontSize = 12.sp)
             }
         }
 
@@ -1774,7 +1893,18 @@ fun AiAssistantScreen(viewModel: MarketplaceViewModel) {
                 shape = RoundedCornerShape(24.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary
-                )
+                ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        if (inputQuery.isNotBlank()) {
+                            viewModel.sendChatMessage(inputQuery)
+                            inputQuery = ""
+                        }
+                    }
+                ),
+                singleLine = false,
+                maxLines = 4
             )
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -1791,6 +1921,7 @@ fun AiAssistantScreen(viewModel: MarketplaceViewModel) {
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary)
                     .testTag("chat_send_btn")
+                    .semantics { contentDescription = "إرسال الرسالة" }
             ) {
                 Icon(
                     imageVector = Icons.Filled.Send,
