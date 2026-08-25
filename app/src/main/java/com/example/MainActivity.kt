@@ -4,19 +4,20 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.viewModels
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.MarketplaceMainScreen
 import com.example.ui.theme.MyApplicationTheme
-import com.example.ui.viewmodel.MarketplaceViewModel
 
 class MainActivity : ComponentActivity() {
-    private val viewModel: MarketplaceViewModel by viewModels()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
+                val app = application as AlWahaApplication
+                val viewModel: com.example.ui.viewmodel.MarketplaceViewModel = viewModel(
+                    factory = com.example.ui.viewmodel.MarketplaceViewModel.provideFactory(app.container.marketplaceRepository)
+                )
                 MarketplaceMainScreen(viewModel = viewModel)
             }
         }

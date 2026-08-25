@@ -24,7 +24,10 @@ interface MarketplaceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertItem(item: MarketplaceItem)
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Query("SELECT COUNT(*) FROM marketplace_items")
+    suspend fun getItemCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(items: List<MarketplaceItem>)
 
     @Update

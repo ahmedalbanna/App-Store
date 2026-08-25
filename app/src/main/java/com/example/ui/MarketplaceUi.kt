@@ -26,15 +26,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.database.MarketplaceItem
+import com.example.ui.navigation.MarketplaceTab
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ChatMessage
 import com.example.ui.viewmodel.MarketplaceViewModel
@@ -46,56 +45,55 @@ import kotlin.math.sin
 fun MarketplaceMainScreen(viewModel: MarketplaceViewModel) {
     val currentTab by viewModel.currentTab.collectAsState()
     val selectedItem by viewModel.selectedItem.collectAsState()
-    val allItems by viewModel.allItems.collectAsState()
 
-    // Enforce Arabic RTL direction globally for an authentic Arabic App Store experience !
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background
-        ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Top App Bar
-                    MarketBarHeader(viewModel = viewModel)
+    // Phase 1.5: Removed global forced RTL. System handles RTL via supportsRtl + device locale.
+    // For Arabic locale, LocalLayoutDirection will be Rtl automatically; for LTR locales it stays Ltr.
+    // This fixes forced RTL on English devices while keeping authentic Arabic layout when needed.
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Top App Bar
+                MarketBarHeader(viewModel = viewModel)
 
-                    // Main Content depending on active tab
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                    ) {
-                        AnimatedContent(
-                            targetState = currentTab,
-                            transitionSpec = {
-                                fadeIn(animationSpec = tween(220)) with fadeOut(animationSpec = tween(220))
-                            }
-                        ) { tab ->
-                            when (tab) {
-                                "READ_BOOK_VIEW" -> BookReaderScreen(viewModel = viewModel)
-                                "WATCH_MOVIE_VIEW" -> MovieCinemaScreen(viewModel = viewModel)
-                                "PLAY_MUSIC_VIEW" -> MusicPlayerScreen(viewModel = viewModel)
-                                "ASSISTANT" -> AiAssistantScreen(viewModel = viewModel)
-                                else -> DashboardGridScreen(viewModel = viewModel)
-                            }
+                // Main Content depending on active tab
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    AnimatedContent(
+                        targetState = currentTab,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(220)) with fadeOut(animationSpec = tween(220))
+                        }
+                    ) { tab ->
+                        when (tab) {
+                            "READ_BOOK_VIEW" -> BookReaderScreen(viewModel = viewModel)
+                            "WATCH_MOVIE_VIEW" -> MovieCinemaScreen(viewModel = viewModel)
+                            "PLAY_MUSIC_VIEW" -> MusicPlayerScreen(viewModel = viewModel)
+                            "ASSISTANT" -> AiAssistantScreen(viewModel = viewModel)
+                            else -> DashboardGridScreen(viewModel = viewModel)
                         }
                     }
-
-                    // Bottom Navigation Bar
-                    MarketBottomNavBar(
-                        selectedTab = currentTab,
-                        onTabSelect = { viewModel.changeTab(it) }
-                    )
                 }
 
-                // Details Bottom Sheet / Overlay Dialog
-                selectedItem?.let { item ->
-                    CardDetailsBottomSheet(
-                        item = item,
-                        onDismiss = { viewModel.selectItem(null) },
-                        viewModel = viewModel
-                    )
-                }
+                // Bottom Navigation Bar
+                MarketBottomNavBar(
+                    selectedTab = currentTab,
+                    onTabSelect = { viewModel.changeTab(it) }
+                )
+            }
+
+            // Details Bottom Sheet / Overlay Dialog
+            selectedItem?.let { item ->
+                CardDetailsBottomSheet(
+                    item = item,
+                    onDismiss = { viewModel.selectItem(null) },
+                    viewModel = viewModel
+                )
             }
         }
     }
@@ -162,14 +160,15 @@ fun MarketBarHeader(viewModel: MarketplaceViewModel) {
 
 @Composable
 fun MarketBottomNavBar(selectedTab: String, onTabSelect: (String) -> Unit) {
+    // Phase 1.6: Derived from MarketplaceTab enum (single source of truth) — labels kept separate
     val navigationDirs = listOf(
-        Triple("APPS", "تطبيقات", Icons.Outlined.Apps to Icons.Filled.Apps),
-        Triple("GAMES", "ألعاب", Icons.Outlined.SportsEsports to Icons.Filled.SportsEsports),
-        Triple("BOOKS", "كتب", Icons.Outlined.MenuBook to Icons.Filled.MenuBook),
-        Triple("MOVIES", "أفلام", Icons.Outlined.MovieFilter to Icons.Filled.MovieFilter),
-        Triple("MUSIC", "موسيقى", Icons.Outlined.MusicNote to Icons.Filled.MusicNote),
-        Triple("LIBRARY", "مكتبتي", Icons.Outlined.LibraryBooks to Icons.Filled.LibraryBooks),
-        Triple("ASSISTANT", "المساعد", Icons.Outlined.AutoAwesome to Icons.Filled.AutoAwesome)
+        Triple(MarketplaceTab.APPS.route, "تطبيقات", Icons.Outlined.Apps to Icons.Filled.Apps),
+        Triple(MarketplaceTab.GAMES.route, "ألعاب", Icons.Outlined.SportsEsports to Icons.Filled.SportsEsports),
+        Triple(MarketplaceTab.BOOKS.route, "كتب", Icons.Outlined.MenuBook to Icons.Filled.MenuBook),
+        Triple(MarketplaceTab.MOVIES.route, "أفلام", Icons.Outlined.MovieFilter to Icons.Filled.MovieFilter),
+        Triple(MarketplaceTab.MUSIC.route, "موسيقى", Icons.Outlined.MusicNote to Icons.Filled.MusicNote),
+        Triple(MarketplaceTab.LIBRARY.route, "مكتبتي", Icons.Outlined.LibraryBooks to Icons.Filled.LibraryBooks),
+        Triple(MarketplaceTab.ASSISTANT.route, "المساعد", Icons.Outlined.AutoAwesome to Icons.Filled.AutoAwesome)
     )
 
     NavigationBar(

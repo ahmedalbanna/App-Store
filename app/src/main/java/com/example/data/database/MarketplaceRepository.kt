@@ -4,28 +4,32 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
-class MarketplaceRepository(
+class MarketplaceRepositoryImpl(
     private val marketplaceDao: MarketplaceDao,
     private val context: Context
-) {
-    val allItems: Flow<List<MarketplaceItem>> = marketplaceDao.getAllItems()
+) : MarketplaceRepository {
+    override val allItems: Flow<List<MarketplaceItem>> = marketplaceDao.getAllItems()
 
-    fun getItemsByType(type: String): Flow<List<MarketplaceItem>> =
+    // Job-tracked downloads (Phase 1.3) — cancellable and per-item
+    private val downloadJobs = ConcurrentHashMap<String, Job>()
+
+    override fun getItemsByType(type: String): Flow<List<MarketplaceItem>> =
         marketplaceDao.getItemsByType(type)
 
-    fun getItemById(id: String): Flow<MarketplaceItem?> =
+    override fun getItemById(id: String): Flow<MarketplaceItem?> =
         marketplaceDao.getItemByIdFlow(id)
 
     // Initializer to pre-populate database with elegant Arabic content on startup
-    suspend fun checkAndPrepulateDatabase() {
+    override suspend fun checkAndPrepulateDatabase() {
         withContext(Dispatchers.IO) {
-            val count = marketplaceDao.getAllItems().first().size
+            val count = marketplaceDao.getItemCount()
             if (count == 0) {
                 Log.d("MarketplaceRepository", "Pre-populating database with rich Al-Waha Arabic catalog...")
                 val sampleItems = listOf(
@@ -283,19 +287,21 @@ class MarketplaceRepository(
         }
     }
 
-    // Function to simulate background downloading with progressive values
-    fun triggerDownloadProgress(itemId: String, scope: CoroutineScope) {
-        scope.launch(Dispatchers.IO) {
+    // Function to simulate background downloading with progressive values — Job-tracked (1.3)
+    override fun triggerDownloadProgress(itemId: String, scope: CoroutineScope) {
+        // Cancel any prior job for this item (idempotent retry)
+        downloadJobs[itemId]?.cancel()
+        val job = scope.launch(Dispatchers.IO) {
             try {
                 // Initialize state
                 marketplaceDao.updateDownloadState(itemId, "DOWNLOADING", 0)
-                
+
                 // Simulate progressive download chunks (0% -> 100%)
                 for (progress in 5..100 step 15) {
                     delay(300)
                     marketplaceDao.updateDownloadState(itemId, "DOWNLOADING", progress)
                 }
-                
+
                 // Set download 100% complete
                 marketplaceDao.updateDownloadState(itemId, "DOWNLOADING", 100)
                 delay(400)
@@ -323,14 +329,34 @@ class MarketplaceRepository(
                     )
                 }
             } catch (e: Exception) {
+                // Cancellation is expected when user cancels; don't reset to NONE if cancelled explicitly via resetDownloadState
+                if (e is kotlinx.coroutines.CancellationException) {
+                    Log.d("MarketplaceRepository", "Download cancelled for $itemId")
+                    throw e
+                }
                 Log.e("MarketplaceRepository", "Download simulation error for $itemId: ${e.message}")
                 marketplaceDao.updateDownloadState(itemId, "NONE", 0)
+            } finally {
+                downloadJobs.remove(itemId)
             }
         }
+        downloadJobs[itemId] = job
+        // Clean up on completion
+        job.invokeOnCompletion { downloadJobs.remove(itemId) }
+    }
+
+    override fun cancelDownload(itemId: String) {
+        downloadJobs[itemId]?.cancel()
+        downloadJobs.remove(itemId)
+    }
+
+    override fun cancelAllDownloads() {
+        downloadJobs.values.forEach { it.cancel() }
+        downloadJobs.clear()
     }
 
     // Function to simulate a trigger installation (PackageInstaller prompt simulator)
-    suspend fun installPackage(itemId: String) {
+    override suspend fun installPackage(itemId: String) {
         withContext(Dispatchers.IO) {
             val item = marketplaceDao.getItemById(itemId)
             if (item != null) {
@@ -349,7 +375,9 @@ class MarketplaceRepository(
     }
 
     // Cancel dynamic download / Reset download state
-    suspend fun resetDownloadState(itemId: String) {
+    override suspend fun resetDownloadState(itemId: String) {
+        // Cancel ongoing job first (1.3)
+        cancelDownload(itemId)
         withContext(Dispatchers.IO) {
             val item = marketplaceDao.getItemById(itemId)
             if (item != null) {
@@ -367,7 +395,7 @@ class MarketplaceRepository(
     }
 
     // Update bookmark status
-    suspend fun toggleBookmark(itemId: String) {
+    override suspend fun toggleBookmark(itemId: String) {
         withContext(Dispatchers.IO) {
             val item = marketplaceDao.getItemById(itemId)
             if (item != null) {
@@ -377,7 +405,7 @@ class MarketplaceRepository(
     }
 
     // Save reading progress of books
-    suspend fun saveBookProgress(itemId: String, lastPage: Int) {
+    override suspend fun saveBookProgress(itemId: String, lastPage: Int) {
         withContext(Dispatchers.IO) {
             marketplaceDao.updateBookProgress(itemId, lastPage)
         }

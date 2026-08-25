@@ -1,17 +1,17 @@
 package com.example.ui.viewmodel
 
-import android.app.Application
 import android.util.Log
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.data.api.Content
 import com.example.data.api.GenerateContentRequest
 import com.example.data.api.Part
 import com.example.data.api.RetrofitClient
-import com.example.data.database.AppDatabase
+import androidx.lifecycle.ViewModelProvider
 import com.example.data.database.MarketplaceItem
 import com.example.data.database.MarketplaceRepository
+import com.example.ui.navigation.MarketplaceTab
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,14 +30,28 @@ data class ChatMessage(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-class MarketplaceViewModel(application: Application) : AndroidViewModel(application) {
+class MarketplaceViewModel(
+    private val repository: MarketplaceRepository
+) : ViewModel() {
 
-    private val database = AppDatabase.getDatabase(application)
-    private val repository = MarketplaceRepository(database.marketplaceDao(), application)
+    companion object {
+        fun provideFactory(repository: MarketplaceRepository): ViewModelProvider.Factory =
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                    return MarketplaceViewModel(repository) as T
+                }
+            }
+    }
 
-    // Current screen orientation / Tab choice
-    private val _currentTab = MutableStateFlow("APPS") // "APPS", "GAMES", "BOOKS", "MOVIES", "MUSIC", "ASSISTANT", "LIBRARY"
+    // Current screen orientation / Tab choice — String kept for backwards compat (Phase 1.6 adds typed wrapper)
+    private val _currentTab = MutableStateFlow(MarketplaceTab.APPS.route) // "APPS", "GAMES", "BOOKS", "MOVIES", "MUSIC", "ASSISTANT", "LIBRARY"
     val currentTab: StateFlow<String> = _currentTab.asStateFlow()
+
+    // Typed navigation (Phase 1.6) — preferred API for new code (Eagerly for test determinism)
+    val currentTabEnum: StateFlow<MarketplaceTab> = _currentTab
+        .map { MarketplaceTab.fromRoute(it) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, MarketplaceTab.APPS)
 
     // Query for generic app search
     private val _searchQuery = MutableStateFlow("")
@@ -91,14 +105,10 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
         list.filter { it.isDownloaded }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Tab -> ItemType mapping (APPS is UI tab, APP is DB type). Fixes P0 where type==tab never matched.
-    private val tabToType: Map<String, String> = mapOf(
-        "APPS" to "APP",
-        "GAMES" to "GAME",
-        "BOOKS" to "BOOK",
-        "MOVIES" to "MOVIE",
-        "MUSIC" to "MUSIC"
-    )
+    // Tab -> ItemType mapping (APPS is UI tab, APP is DB type). Phase 1.6 derives from enum to keep single source of truth.
+    private val tabToType: Map<String, String> = MarketplaceTab.entries
+        .filter { it.itemType != null }
+        .associate { it.route to it.itemType!! }
 
     // Combined Flow for filtering results with Search Box
     val filteredItems: StateFlow<List<MarketplaceItem>> = combine(allItems, searchQuery, currentTab) { list, query, tab ->
@@ -167,6 +177,11 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
     fun changeTab(newTab: String) {
         _currentTab.value = newTab
         _searchQuery.value = "" // clear search on shift
+    }
+
+    /** Typed overload (Phase 1.6) */
+    fun changeTab(tab: MarketplaceTab) {
+        changeTab(tab.route)
     }
 
     fun setSearchQuery(query: String) {

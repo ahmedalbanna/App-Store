@@ -1,9 +1,16 @@
 package com.example.data.database
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "marketplace_items")
+@Entity(
+    tableName = "marketplace_items",
+    indices = [
+        Index(value = ["type"]),
+        Index(value = ["downloadState"])
+    ]
+)
 data class MarketplaceItem(
     @PrimaryKey val id: String,
     val titleAr: String,

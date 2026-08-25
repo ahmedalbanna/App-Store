@@ -1,0 +1,37 @@
+package com.example.di
+
+import android.content.Context
+import androidx.room.Room
+import com.example.data.api.GeminiApiService
+import com.example.data.api.RetrofitClient
+import com.example.data.database.AppDatabase
+import com.example.data.database.MARKETPLACE_DB_MIGRATION_1_2
+import com.example.data.database.MarketplaceDao
+import com.example.data.database.MarketplaceRepository
+import com.example.data.database.MarketplaceRepositoryImpl
+
+/**
+ * Phase 1.1: Manual DI container (Hilt alternative without Gradle plugin classpath issues).
+ * Provides same Singletons as Hilt's DatabaseModule/RepositoryModule but via plain Kotlin.
+ * Keeps @Singleton semantics via lazy singletons and @ApplicationContext via constructor.
+ */
+class AppContainer(private val context: Context) {
+
+    val database: AppDatabase by lazy {
+        Room.databaseBuilder(
+            context.applicationContext,
+            AppDatabase::class.java,
+            "alwaha_marketplace_db"
+        )
+            .addMigrations(MARKETPLACE_DB_MIGRATION_1_2)
+            .build()
+    }
+
+    val marketplaceDao: MarketplaceDao by lazy { database.marketplaceDao() }
+
+    val marketplaceRepository: MarketplaceRepository by lazy {
+        MarketplaceRepositoryImpl(marketplaceDao, context.applicationContext)
+    }
+
+    val geminiService: GeminiApiService by lazy { RetrofitClient.service }
+}
