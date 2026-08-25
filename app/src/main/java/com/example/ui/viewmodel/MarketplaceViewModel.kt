@@ -91,14 +91,35 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
         list.filter { it.isDownloaded }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // Tab -> ItemType mapping (APPS is UI tab, APP is DB type). Fixes P0 where type==tab never matched.
+    private val tabToType: Map<String, String> = mapOf(
+        "APPS" to "APP",
+        "GAMES" to "GAME",
+        "BOOKS" to "BOOK",
+        "MOVIES" to "MOVIE",
+        "MUSIC" to "MUSIC"
+    )
+
     // Combined Flow for filtering results with Search Box
     val filteredItems: StateFlow<List<MarketplaceItem>> = combine(allItems, searchQuery, currentTab) { list, query, tab ->
         var res = list
-        if (tab != "LIBRARY") {
-            res = res.filter { it.type == tab }
-        } else {
-            // For Library view, show either booked or downloaded
-            res = res.filter { it.isBookmarked || it.isDownloaded || it.isInstalled }
+        when {
+            tab == "LIBRARY" -> {
+                // For Library view, show either bookmarked or downloaded/installed
+                res = res.filter { it.isBookmarked || it.isDownloaded || it.isInstalled }
+            }
+            tabToType.containsKey(tab) -> {
+                val targetType = tabToType[tab]
+                res = res.filter { it.type == targetType }
+            }
+            tab in setOf("ASSISTANT", "READ_BOOK_VIEW", "WATCH_MOVIE_VIEW", "PLAY_MUSIC_VIEW") -> {
+                // Internal non-list screens do not use the grid; return empty to avoid stray data
+                res = emptyList()
+            }
+            else -> {
+                // Fallback: unknown tab -> empty (fail-safe vs showing all items)
+                res = emptyList()
+            }
         }
         if (query.isNotEmpty()) {
             res = res.filter {
@@ -119,19 +140,29 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
     private val _isChatLoading = MutableStateFlow(false)
     val isChatLoading: StateFlow<Boolean> = _isChatLoading.asStateFlow()
 
-    // Current Media Player values
-    val currentPlayingMusic = MutableStateFlow<MarketplaceItem?>(null)
-    val isPlayingMusic = MutableStateFlow(false)
-    val musicPlaybackProgress = MutableStateFlow(0.35f) // simulated volume / progress
+    // Current Media Player values — private mutable, public read-only (P0 encapsulation fix)
+    private val _currentPlayingMusic = MutableStateFlow<MarketplaceItem?>(null)
+    val currentPlayingMusic: StateFlow<MarketplaceItem?> = _currentPlayingMusic.asStateFlow()
+    private val _isPlayingMusic = MutableStateFlow(false)
+    val isPlayingMusic: StateFlow<Boolean> = _isPlayingMusic.asStateFlow()
+    private val _musicPlaybackProgress = MutableStateFlow(0.35f) // simulated progress
+    val musicPlaybackProgress: StateFlow<Float> = _musicPlaybackProgress.asStateFlow()
 
     // Active Book progress states
-    val activeReadingBook = MutableStateFlow<MarketplaceItem?>(null)
+    private val _activeReadingBook = MutableStateFlow<MarketplaceItem?>(null)
+    val activeReadingBook: StateFlow<MarketplaceItem?> = _activeReadingBook.asStateFlow()
     val bookPageCount = 312 // simulated page counts
+    // Backwards-compat alias used only internally; avoid direct mutation from UI
+    @Deprecated("Use _activeReadingBook / activeReadingBook", ReplaceWith("_activeReadingBook"))
+    val activeReadingBookLegacy: MutableStateFlow<MarketplaceItem?> get() = _activeReadingBook
 
-    // Cinema screen states
-    val activeWatchingMovie = MutableStateFlow<MarketplaceItem?>(null)
-    val isPlayingMovie = MutableStateFlow(false)
-    val moviePlaybackProgress = MutableStateFlow(0.12f)
+    // Cinema screen states — private mutable, public read-only
+    private val _activeWatchingMovie = MutableStateFlow<MarketplaceItem?>(null)
+    val activeWatchingMovie: StateFlow<MarketplaceItem?> = _activeWatchingMovie.asStateFlow()
+    private val _isPlayingMovie = MutableStateFlow(false)
+    val isPlayingMovie: StateFlow<Boolean> = _isPlayingMovie.asStateFlow()
+    private val _moviePlaybackProgress = MutableStateFlow(0.12f)
+    val moviePlaybackProgress: StateFlow<Float> = _moviePlaybackProgress.asStateFlow()
 
     fun changeTab(newTab: String) {
         _currentTab.value = newTab
@@ -178,17 +209,17 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
     fun openContent(item: MarketplaceItem) {
         when (item.type) {
             "BOOK" -> {
-                activeReadingBook.value = item
+                _activeReadingBook.value = item
                 _currentTab.value = "READ_BOOK_VIEW"
             }
             "MOVIE" -> {
-                activeWatchingMovie.value = item
-                isPlayingMovie.value = true
+                _activeWatchingMovie.value = item
+                _isPlayingMovie.value = true
                 _currentTab.value = "WATCH_MOVIE_VIEW"
             }
             "MUSIC" -> {
-                currentPlayingMusic.value = item
-                isPlayingMusic.value = true
+                _currentPlayingMusic.value = item
+                _isPlayingMusic.value = true
                 _currentTab.value = "PLAY_MUSIC_VIEW"
             }
             else -> {
@@ -196,6 +227,15 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
     }
+
+    // --- Encapsulated media controls (replaces direct viewModel.isPlayingX.value = ... from UI) ---
+    fun setIsPlayingMusic(playing: Boolean) { _isPlayingMusic.value = playing }
+    fun toggleIsPlayingMusic() { _isPlayingMusic.value = !_isPlayingMusic.value }
+    fun setMusicPlaybackProgress(progress: Float) { _musicPlaybackProgress.value = progress.coerceIn(0f, 1f) }
+    fun setIsPlayingMovie(playing: Boolean) { _isPlayingMovie.value = playing }
+    fun toggleIsPlayingMovie() { _isPlayingMovie.value = !_isPlayingMovie.value }
+    fun setMoviePlaybackProgress(progress: Float) { _moviePlaybackProgress.value = progress.coerceIn(0f, 1f) }
+    fun setActiveReadingBook(item: MarketplaceItem?) { _activeReadingBook.value = item }
 
     fun toggleBookmark(item: MarketplaceItem) {
         viewModelScope.launch {
@@ -211,9 +251,9 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
     fun saveBookProgress(itemId: String, page: Int) {
         viewModelScope.launch {
             repository.saveBookProgress(itemId, page)
-            val active = activeReadingBook.value
+            val active = _activeReadingBook.value
             if (active != null && active.id == itemId) {
-                activeReadingBook.value = active.copy(lastReadPage = page)
+                _activeReadingBook.value = active.copy(lastReadPage = page)
             }
         }
     }

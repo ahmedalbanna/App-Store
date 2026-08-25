@@ -1094,7 +1094,7 @@ fun MovieCinemaScreen(viewModel: MarketplaceViewModel) {
                 )
             } else {
                 IconButton(
-                    onClick = { viewModel.isPlayingMovie.value = true },
+                    onClick = { viewModel.setIsPlayingMovie(true) },
                     modifier = Modifier
                         .size(64.dp)
                         .clip(CircleShape)
@@ -1115,7 +1115,7 @@ fun MovieCinemaScreen(viewModel: MarketplaceViewModel) {
             Text("02:14", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
             Slider(
                 value = progress,
-                onValueChange = { viewModel.moviePlaybackProgress.value = it },
+                onValueChange = { viewModel.setMoviePlaybackProgress(it) },
                 modifier = Modifier.weight(1f),
                 colors = SliderDefaults.colors(
                     activeTrackColor = OasisPrimaryDark,
@@ -1136,7 +1136,7 @@ fun MovieCinemaScreen(viewModel: MarketplaceViewModel) {
             IconButton(
                 onClick = {
                     val next = (progress - 0.05f).coerceIn(0f, 1f)
-                    viewModel.moviePlaybackProgress.value = next
+                    viewModel.setMoviePlaybackProgress(next)
                 },
                 modifier = Modifier.size(48.dp)
             ) {
@@ -1146,7 +1146,7 @@ fun MovieCinemaScreen(viewModel: MarketplaceViewModel) {
             Spacer(modifier = Modifier.width(20.dp))
 
             IconButton(
-                onClick = { viewModel.isPlayingMovie.value = !isPlaying },
+                onClick = { viewModel.toggleIsPlayingMovie() },
                 modifier = Modifier
                     .size(64.dp)
                     .clip(CircleShape)
@@ -1165,7 +1165,7 @@ fun MovieCinemaScreen(viewModel: MarketplaceViewModel) {
             IconButton(
                 onClick = {
                     val next = (progress + 0.05f).coerceIn(0f, 1f)
-                    viewModel.moviePlaybackProgress.value = next
+                    viewModel.setMoviePlaybackProgress(next)
                 },
                 modifier = Modifier.size(48.dp)
             ) {
@@ -1329,7 +1329,7 @@ fun MusicPlayerScreen(viewModel: MarketplaceViewModel) {
         // Progress Bar
         Slider(
             value = progress,
-            onValueChange = { viewModel.musicPlaybackProgress.value = it },
+            onValueChange = { viewModel.setMusicPlaybackProgress(it) },
             modifier = Modifier.padding(horizontal = 16.dp),
             colors = SliderDefaults.colors(
                 activeTrackColor = OasisPrimaryDark,
@@ -1353,7 +1353,7 @@ fun MusicPlayerScreen(viewModel: MarketplaceViewModel) {
                 }
                 Spacer(modifier = Modifier.width(16.dp))
                 IconButton(
-                    onClick = { viewModel.isPlayingMusic.value = !isPlaying },
+                    onClick = { viewModel.toggleIsPlayingMusic() },
                     modifier = Modifier
                         .size(56.dp)
                         .clip(CircleShape)
