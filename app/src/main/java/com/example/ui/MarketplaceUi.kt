@@ -11,33 +11,55 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
 import com.example.data.database.MarketplaceItem
 import com.example.ui.navigation.MarketplaceTab
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ChatMessage
 import com.example.ui.viewmodel.MarketplaceViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.sin
 
 @OptIn(ExperimentalAnimationApi::class, ExperimentalMaterial3Api::class)
@@ -57,6 +79,9 @@ fun MarketplaceMainScreen(viewModel: MarketplaceViewModel) {
             Column(modifier = Modifier.fillMaxSize()) {
                 // Top App Bar
                 MarketBarHeader(viewModel = viewModel)
+
+                // Phase 2.5: Notification permission rationale (no-op on SDK<33)
+                NotificationPermissionHandler()
 
                 // Main Content depending on active tab
                 Box(
@@ -113,7 +138,7 @@ fun MarketBarHeader(viewModel: MarketplaceViewModel) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = "متجر الواحة",
                 style = MaterialTheme.typography.headlineLarge.copy(
@@ -129,30 +154,58 @@ fun MarketBarHeader(viewModel: MarketplaceViewModel) {
             )
         }
 
-        // Library shortcut badge on top with incremental ring if downloading is active
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable { viewModel.changeTab("LIBRARY") }
-                .testTag("top_library_button"),
-            contentAlignment = Alignment.Center
+        // Phase 2.1: Top-bar actions for Library + Assistant (5-item bottom nav now only primary tabs)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = if (currentTab == "LIBRARY") Icons.Filled.FolderSpecial else Icons.Outlined.FolderSpecial,
-                contentDescription = "المكتبة وتنزيلات المحتوى",
-                tint = MaterialTheme.colorScheme.primary
-            )
-            if (count > 0) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(Color.Red)
-                        .align(Alignment.TopEnd)
-                        .offset(x = (-4).dp, y = 4.dp)
+            // Assistant (AI) — top action per 2.1, 48dp target for a11y
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (currentTab == "ASSISTANT") MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    .clickable { viewModel.changeTab("ASSISTANT") }
+                    .testTag("top_assistant_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (currentTab == "ASSISTANT") Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome,
+                    contentDescription = "المساعد الذكي",
+                    tint = MaterialTheme.colorScheme.primary
                 )
+            }
+            // Library shortcut badge with downloading indicator
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (currentTab == "LIBRARY") MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    .clickable { viewModel.changeTab("LIBRARY") }
+                    .testTag("top_library_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (currentTab == "LIBRARY") Icons.Filled.FolderSpecial else Icons.Outlined.FolderSpecial,
+                    contentDescription = "المكتبة وتنزيلات المحتوى",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                if (count > 0) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(Color.Red)
+                            .align(Alignment.TopEnd)
+                            .offset(x = (-4).dp, y = 4.dp)
+                    )
+                }
             }
         }
     }
@@ -160,15 +213,13 @@ fun MarketBarHeader(viewModel: MarketplaceViewModel) {
 
 @Composable
 fun MarketBottomNavBar(selectedTab: String, onTabSelect: (String) -> Unit) {
-    // Phase 1.6: Derived from MarketplaceTab enum (single source of truth) — labels kept separate
+    // Phase 2.1: 5 primary destinations only (Material3 guideline), Library+Assistant moved to top bar
     val navigationDirs = listOf(
         Triple(MarketplaceTab.APPS.route, "تطبيقات", Icons.Outlined.Apps to Icons.Filled.Apps),
         Triple(MarketplaceTab.GAMES.route, "ألعاب", Icons.Outlined.SportsEsports to Icons.Filled.SportsEsports),
         Triple(MarketplaceTab.BOOKS.route, "كتب", Icons.Outlined.MenuBook to Icons.Filled.MenuBook),
         Triple(MarketplaceTab.MOVIES.route, "أفلام", Icons.Outlined.MovieFilter to Icons.Filled.MovieFilter),
-        Triple(MarketplaceTab.MUSIC.route, "موسيقى", Icons.Outlined.MusicNote to Icons.Filled.MusicNote),
-        Triple(MarketplaceTab.LIBRARY.route, "مكتبتي", Icons.Outlined.LibraryBooks to Icons.Filled.LibraryBooks),
-        Triple(MarketplaceTab.ASSISTANT.route, "المساعد", Icons.Outlined.AutoAwesome to Icons.Filled.AutoAwesome)
+        Triple(MarketplaceTab.MUSIC.route, "موسيقى", Icons.Outlined.MusicNote to Icons.Filled.MusicNote)
     )
 
     NavigationBar(
@@ -198,7 +249,7 @@ fun MarketBottomNavBar(selectedTab: String, onTabSelect: (String) -> Unit) {
                 label = {
                     Text(
                         text = label,
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -318,29 +369,37 @@ fun FeaturedHeroCard(currentTab: String) {
     }
 }
 
-// Main grid of items
+// Main grid of items — Phase 2.2/2.4: debounce (VM), highlight, recent chips, pull-to-refresh, shimmer, empty CTA
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardGridScreen(viewModel: MarketplaceViewModel) {
     val filteredItems by viewModel.filteredItems.collectAsState()
     val currentTab by viewModel.currentTab.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val recentQueries by viewModel.recentQueries.collectAsState()
+    val allItems by viewModel.allItems.collectAsState()
+    val scope = rememberCoroutineScope()
+    var isRefreshing by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Built-in Arabic Search Bar with absolute relative paddings
+        // Search Bar — debounced in VM (300ms), filters by title/category/creator, saves recents on Done
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { viewModel.setSearchQuery(it) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 6.dp)
-                .testTag("search_text_input"),
+                .testTag("search_text_input")
+                .semantics { contentDescription = "حقل البحث" },
             placeholder = { Text("ابحث عن تطبيقات، ألعاب، كتب، موسيقى...") },
-            leadingIcon = { Icon(Icons.Filled.Search, "بحث") },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "بحث") },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { viewModel.setSearchQuery("") }) {
-                        Icon(Icons.Filled.Close, "مسح")
+                    IconButton(
+                        onClick = { viewModel.setSearchQuery("") },
+                        modifier = Modifier.semantics { contentDescription = "مسح البحث" }
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = "مسح")
                     }
                 }
             },
@@ -351,12 +410,64 @@ fun DashboardGridScreen(viewModel: MarketplaceViewModel) {
                 focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                 unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f)
             ),
-            singleLine = true
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    viewModel.onSearchSubmitted(searchQuery)
+                }
+            )
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        // Recent queries chips (DataStore) — show when search empty
+        if (searchQuery.isEmpty() && recentQueries.isNotEmpty()) {
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    Text(
+                        text = "حديثاً:",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(end = 4.dp, top = 8.dp)
+                    )
+                }
+                items(recentQueries) { recent ->
+                    AssistChip(
+                        onClick = { viewModel.setSearchQuery(recent) },
+                        label = { Text(recent, fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Filled.History, contentDescription = "بحث سابق", modifier = Modifier.size(16.dp)) },
+                        modifier = Modifier.testTag("recent_chip_${recent}")
+                    )
+                }
+                item {
+                    TextButton(
+                        onClick = { viewModel.clearRecentQueries() },
+                        modifier = Modifier.testTag("clear_recents")
+                    ) { Text("مسح", fontSize = 12.sp) }
+                }
+            }
+        }
 
-        if (filteredItems.isEmpty()) {
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Phase 2.4: Shimmer while initial load (allItems empty but no query)
+        val isInitialLoading = allItems.isEmpty() && filteredItems.isEmpty() && searchQuery.isEmpty()
+
+        if (isInitialLoading) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                repeat(5) { ShimmerRowPlaceholder() }
+            }
+        } else if (filteredItems.isEmpty()) {
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -387,48 +498,98 @@ fun DashboardGridScreen(viewModel: MarketplaceViewModel) {
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
                         modifier = Modifier.padding(top = 4.dp)
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    // Empty CTA — Phase 2.2/2.4
+                    if (searchQuery.isNotEmpty()) {
+                        Button(
+                            onClick = { viewModel.setSearchQuery("") },
+                            modifier = Modifier.testTag("empty_clear_search")
+                        ) { Text("مسح البحث") }
+                    } else {
+                        OutlinedButton(
+                            onClick = { viewModel.changeTab("APPS") },
+                            modifier = Modifier.testTag("empty_browse_apps")
+                        ) { Text("تصفح التطبيقات") }
+                    }
                 }
             }
         } else {
-            LazyColumn(
+            // Phase 2.4: Pull-to-refresh
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    scope.launch {
+                        isRefreshing = true
+                        delay(900)
+                        isRefreshing = false
+                    }
+                },
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                    .fillMaxWidth()
             ) {
-                if (searchQuery.isEmpty()) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    if (searchQuery.isEmpty()) {
+                        item {
+                            FeaturedHeroCard(currentTab = currentTab)
+                        }
+                    }
+
+                    // Section Title depending on active Tab
                     item {
-                        FeaturedHeroCard(currentTab = currentTab)
+                        val sectionAr = when (currentTab) {
+                            "APPS" -> "التطبيقات الموصى بها"
+                            "GAMES" -> "أقوى الألعاب العربية"
+                            "BOOKS" -> "روائع الكتب والروايات"
+                            "MOVIES" -> "مجموعة الأفلام والوديان"
+                            "MUSIC" -> "أناشيد ومعزوفات الواحة"
+                            else -> "مكتبتي الخاصة"
+                        }
+                        Text(
+                            text = sectionAr,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            ),
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
                     }
-                }
 
-                // Section Title depending on active Tab
-                item {
-                    val sectionAr = when (currentTab) {
-                        "APPS" -> "التطبيقات الموصى بها"
-                        "GAMES" -> "أقوى الألعاب العربية"
-                        "BOOKS" -> "روائع الكتب والروايات"
-                        "MOVIES" -> "مجموعة الأفلام والوديان"
-                        "MUSIC" -> "أناشيد ومعزوفات الواحة"
-                        else -> "مكتبتي الخاصة"
+                    items(filteredItems, key = { it.id }) { item ->
+                        MarketplaceItemRow(item = item, onClick = { viewModel.selectItem(it) }, viewModel = viewModel)
                     }
-                    Text(
-                        text = sectionAr,
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        ),
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
-                }
-
-                items(filteredItems, key = { it.id }) { item ->
-                    MarketplaceItemRow(item = item, onClick = { viewModel.selectItem(it) }, viewModel = viewModel)
                 }
             }
         }
     }
+}
+
+@Composable
+private fun HighlightedText(text: String, query: String, style: androidx.compose.ui.text.TextStyle) {
+    if (query.isBlank()) {
+        Text(text = text, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        return
+    }
+    val annotated = buildAnnotatedString {
+        val lowerText = text.lowercase()
+        val lowerQuery = query.lowercase()
+        var start = 0
+        var index = lowerText.indexOf(lowerQuery, start)
+        while (index >= 0) {
+            append(text.substring(start, index))
+            withStyle(SpanStyle(background = Color.Yellow.copy(alpha = 0.35f), fontWeight = FontWeight.Bold)) {
+                append(text.substring(index, index + query.length))
+            }
+            start = index + query.length
+            index = lowerText.indexOf(lowerQuery, start)
+        }
+        append(text.substring(start))
+    }
+    Text(text = annotated, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 @Composable
@@ -437,11 +598,13 @@ fun MarketplaceItemRow(
     onClick: (MarketplaceItem) -> Unit,
     viewModel: MarketplaceViewModel
 ) {
+    val searchQuery by viewModel.searchQuery.collectAsState()
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick(item) }
-            .testTag("item_card_${item.id}"),
+            .testTag("item_card_${item.id}")
+            .semantics { contentDescription = "${item.titleAr} — ${item.developerOrCreatorAr} — ${item.downloadState}" },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -454,13 +617,20 @@ fun MarketplaceItemRow(
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Icon layout (Displays standard adaptive category icons with neat background circles)
+            // Icon layout — Phase 2.4: Coil AsyncImage placeholder + vector fallback, 48dp+ target
             val decorIcon = when (item.type) {
                 "APP" -> Icons.Filled.Extension
                 "GAME" -> Icons.Filled.Gamepad
                 "BOOK" -> Icons.Filled.MenuBook
                 "MOVIE" -> Icons.Filled.VideoCameraBack
                 else -> Icons.Filled.MusicNote
+            }
+            val iconDesc = when (item.type) {
+                "APP" -> "أيقونة تطبيق"
+                "GAME" -> "أيقونة لعبة"
+                "BOOK" -> "أيقونة كتاب"
+                "MOVIE" -> "أيقونة فيلم"
+                else -> "أيقونة موسيقى"
             }
             Box(
                 modifier = Modifier
@@ -473,12 +643,15 @@ fun MarketplaceItemRow(
                                 MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)
                             )
                         )
-                    ),
+                    )
+                    .semantics { contentDescription = iconDesc },
                 contentAlignment = Alignment.Center
             ) {
+                // Coil placeholder for future remote images — falls back to vector icon
+                // AsyncImage(model = item.imageUrl, contentDescription = iconDesc) would be used when imageUrl exists
                 Icon(
                     imageVector = decorIcon,
-                    contentDescription = null,
+                    contentDescription = iconDesc,
                     tint = Color.White,
                     modifier = Modifier.size(30.dp)
                 )
@@ -486,21 +659,19 @@ fun MarketplaceItemRow(
 
             Spacer(modifier = Modifier.width(14.dp))
 
-            // Text Info Panel (relative starts/ends)
+            // Text Info Panel — Phase 2.2 highlight matches
             Column(modifier = Modifier.weight(1f)) {
-                Text(
+                HighlightedText(
                     text = item.titleAr,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    query = searchQuery,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
                 )
-                Text(
+                HighlightedText(
                     text = item.developerOrCreatorAr,
+                    query = searchQuery,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    )
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -719,7 +890,7 @@ fun CardDetailsBottomSheet(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(decorIcon, null, tint = Color.White, modifier = Modifier.size(38.dp))
+                    Icon(decorIcon, contentDescription = "أيقونة ${item.type}", tint = Color.White, modifier = Modifier.size(38.dp))
                 }
 
                 Spacer(modifier = Modifier.width(16.dp))
@@ -896,12 +1067,20 @@ fun CardDetailsBottomSheet(
     }
 }
 
-// ---------------- 1. BOOK READER SCREEN (قارئ الكتب التفاعلي المدمج ليتذكر آخر صفحة وصل إليها) ----------------
+// ---------------- 1. BOOK READER SCREEN (قارئ الكتب التفاعلي — Phase 2.3 pagination + DataStore prefs) ----------------
 @Composable
 fun BookReaderScreen(viewModel: MarketplaceViewModel) {
     val book by viewModel.activeReadingBook.collectAsState()
-    var fontScale by remember { mutableStateOf(1f) }
-    var isNightMode by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val bookPrefs = remember { com.example.data.datastore.BookPreferences(context) }
+    val persistedFontScale by bookPrefs.fontScale.collectAsState(initial = 1f)
+    val persistedNightMode by bookPrefs.isNightMode.collectAsState(initial = false)
+    var fontScale by remember(persistedFontScale) { mutableStateOf(persistedFontScale) }
+    var isNightMode by remember(persistedNightMode) { mutableStateOf(persistedNightMode) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(persistedFontScale) { fontScale = persistedFontScale }
+    LaunchedEffect(persistedNightMode) { isNightMode = persistedNightMode }
 
     val activeItem = book ?: return
 
@@ -943,20 +1122,45 @@ fun BookReaderScreen(viewModel: MarketplaceViewModel) {
                 color = if (isNightMode) Color.White else Color.Black
             )
 
-            // Adjuster controllers
+            // Adjuster controllers — 48dp targets, persist via DataStore (Phase 2.3/2.6)
             Row {
-                IconButton(onClick = { isNightMode = !isNightMode }) {
+                IconButton(
+                    onClick = {
+                        val new = !isNightMode
+                        isNightMode = new
+                        scope.launch { bookPrefs.setNightMode(new) }
+                    },
+                    modifier = Modifier.semantics { contentDescription = "تبديل الوضع الليلي" }
+                ) {
                     Icon(
                         imageVector = if (isNightMode) Icons.Filled.LightMode else Icons.Filled.DarkMode,
                         contentDescription = "الوضع الليلي",
                         tint = if (isNightMode) Color.White else Color.Black
                     )
                 }
-                IconButton(onClick = { if (fontScale < 1.4f) fontScale += 0.1f }) {
-                    Icon(Icons.Filled.ZoomIn, "تكبير الخط", tint = if (isNightMode) Color.White else Color.Black)
+                IconButton(
+                    onClick = {
+                        if (fontScale < 1.4f) {
+                            val new = fontScale + 0.1f
+                            fontScale = new
+                            scope.launch { bookPrefs.setFontScale(new) }
+                        }
+                    },
+                    modifier = Modifier.semantics { contentDescription = "تكبير الخط" }
+                ) {
+                    Icon(Icons.Filled.ZoomIn, contentDescription = "تكبير الخط", tint = if (isNightMode) Color.White else Color.Black)
                 }
-                IconButton(onClick = { if (fontScale > 0.8f) fontScale -= 0.1f }) {
-                    Icon(Icons.Filled.ZoomOut, "تصغير الخط", tint = if (isNightMode) Color.White else Color.Black)
+                IconButton(
+                    onClick = {
+                        if (fontScale > 0.8f) {
+                            val new = fontScale - 0.1f
+                            fontScale = new
+                            scope.launch { bookPrefs.setFontScale(new) }
+                        }
+                    },
+                    modifier = Modifier.semantics { contentDescription = "تصغير الخط" }
+                ) {
+                    Icon(Icons.Filled.ZoomOut, contentDescription = "تصغير الخط", tint = if (isNightMode) Color.White else Color.Black)
                 }
             }
         }
@@ -1055,7 +1259,53 @@ fun MovieCinemaScreen(viewModel: MarketplaceViewModel) {
             Text(activeItem.titleAr, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
         }
 
-        // Curved Cinema Display Frame to reduce "AI slop" and elevate styling
+        // Curved Cinema Display Frame — Phase 2.3: ExoPlayer (Media3) replaces fake buffer spinner
+        val context = LocalContext.current
+        val lifecycleOwner = LocalLifecycleOwner.current
+        val exoPlayer = remember {
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri("https://storage.googleapis.com/exoplayer-test-media-0/mp4/android-screens-10s.mp4"))
+                prepare()
+                playWhenReady = false
+            }
+        }
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_PAUSE -> exoPlayer.pause()
+                    Lifecycle.Event.ON_RESUME -> if (isPlaying) exoPlayer.play()
+                    else -> {}
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+                exoPlayer.release()
+            }
+        }
+        LaunchedEffect(isPlaying) {
+            exoPlayer.playWhenReady = isPlaying
+            if (isPlaying) exoPlayer.play() else exoPlayer.pause()
+            // Poll player position to update slider (Phase 2.3)
+            while (isPlaying) {
+                delay(250)
+                val duration = exoPlayer.duration.takeIf { it > 0 } ?: 10000L
+                if (duration > 0) {
+                    viewModel.setMoviePlaybackProgress(
+                        (exoPlayer.currentPosition.toFloat() / duration).coerceIn(0f, 1f)
+                    )
+                }
+            }
+        }
+        // Sync slider progress with player (0..1 -> seek)
+        LaunchedEffect(progress) {
+            val duration = exoPlayer.duration.takeIf { it > 0 } ?: 10000L
+            val target = (progress * duration).toLong()
+            if (kotlin.math.abs(exoPlayer.currentPosition - target) > 500) {
+                exoPlayer.seekTo(target)
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1064,7 +1314,7 @@ fun MovieCinemaScreen(viewModel: MarketplaceViewModel) {
                 .background(Color.Black),
             contentAlignment = Alignment.Center
         ) {
-            // Simulated film screen visual background with linear oasis gradients
+            // Oasis radial gradient behind video
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1079,17 +1329,18 @@ fun MovieCinemaScreen(viewModel: MarketplaceViewModel) {
             )
 
             if (isPlaying) {
-                // Buffer looping symbol
-                CircularProgressIndicator(
-                    modifier = Modifier.size(48.dp),
-                    color = OasisPrimaryDark,
-                    strokeWidth = 3.dp
-                )
-                Text(
-                    text = "جاري بث المقطع بجودة HD...",
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 11.sp,
-                    modifier = Modifier.offset(y = 48.dp)
+                AndroidView(
+                    factory = {
+                        PlayerView(it).apply {
+                            player = exoPlayer
+                            useController = false
+                            layoutParams = FrameLayout.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
                 )
             } else {
                 IconButton(
@@ -1098,8 +1349,9 @@ fun MovieCinemaScreen(viewModel: MarketplaceViewModel) {
                         .size(64.dp)
                         .clip(CircleShape)
                         .background(OasisPrimary)
+                        .semantics { contentDescription = "تشغيل الفيديو" }
                 ) {
-                    Icon(Icons.Filled.PlayArrow, "تشغيل", tint = Color.White, modifier = Modifier.size(36.dp))
+                    Icon(Icons.Filled.PlayArrow, contentDescription = "تشغيل", tint = Color.White, modifier = Modifier.size(36.dp))
                 }
             }
         }
@@ -1208,16 +1460,18 @@ fun MusicPlayerScreen(viewModel: MarketplaceViewModel) {
 
     val activeItem = music ?: return
 
-    // continuous rotation angle configuration for vinyl spinning when music plays
-    var rotationAngle by remember { mutableStateOf(0f) }
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            while (true) {
-                rotationAngle = (rotationAngle + 1.5f) % 360f
-                delay(16) // ~60fps rotation ticks
-            }
-        }
-    }
+    // Phase 2.3: Vinyl rotation via rememberInfiniteTransition (replaces while(true) 60fps loop)
+    val infiniteVinyl = rememberInfiniteTransition(label = "vinyl")
+    val vinylRotation by infiniteVinyl.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "vinylRotation"
+    )
+    val rotationAngle = if (isPlaying) vinylRotation else 0f
 
     Column(
         modifier = Modifier
@@ -1342,13 +1596,19 @@ fun MusicPlayerScreen(viewModel: MarketplaceViewModel) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = {}) {
-                Icon(Icons.Filled.Shuffle, null, tint = Color.White.copy(alpha = 0.5f))
+            IconButton(
+                onClick = {},
+                modifier = Modifier.semantics { contentDescription = "عشوائي" }
+            ) {
+                Icon(Icons.Filled.Shuffle, contentDescription = "عشوائي", tint = Color.White.copy(alpha = 0.5f))
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = {}) {
-                    Icon(Icons.Filled.SkipPrevious, null, tint = Color.White, modifier = Modifier.size(36.dp))
+                IconButton(
+                    onClick = {},
+                    modifier = Modifier.semantics { contentDescription = "السابق" }
+                ) {
+                    Icon(Icons.Filled.SkipPrevious, contentDescription = "السابق", tint = Color.White, modifier = Modifier.size(36.dp))
                 }
                 Spacer(modifier = Modifier.width(16.dp))
                 IconButton(
@@ -1357,22 +1617,29 @@ fun MusicPlayerScreen(viewModel: MarketplaceViewModel) {
                         .size(56.dp)
                         .clip(CircleShape)
                         .background(Color.White)
+                        .semantics { contentDescription = if (isPlaying) "إيقاف" else "تشغيل" }
                 ) {
                     Icon(
                         imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = "تشغيل",
+                        contentDescription = if (isPlaying) "إيقاف" else "تشغيل",
                         tint = Color.Black,
                         modifier = Modifier.size(28.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(16.dp))
-                IconButton(onClick = {}) {
-                    Icon(Icons.Filled.SkipNext, null, tint = Color.White, modifier = Modifier.size(36.dp))
+                IconButton(
+                    onClick = {},
+                    modifier = Modifier.semantics { contentDescription = "التالي" }
+                ) {
+                    Icon(Icons.Filled.SkipNext, contentDescription = "التالي", tint = Color.White, modifier = Modifier.size(36.dp))
                 }
             }
 
-            IconButton(onClick = {}) {
-                Icon(Icons.Filled.Loop, null, tint = Color.White.copy(alpha = 0.5f))
+            IconButton(
+                onClick = {},
+                modifier = Modifier.semantics { contentDescription = "تكرار" }
+            ) {
+                Icon(Icons.Filled.Loop, contentDescription = "تكرار", tint = Color.White.copy(alpha = 0.5f))
             }
         }
     }

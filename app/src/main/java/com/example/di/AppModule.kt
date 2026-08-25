@@ -9,6 +9,8 @@ import com.example.data.database.MARKETPLACE_DB_MIGRATION_1_2
 import com.example.data.database.MarketplaceDao
 import com.example.data.database.MarketplaceRepository
 import com.example.data.database.MarketplaceRepositoryImpl
+import com.example.data.datastore.BookPreferences
+import com.example.data.datastore.SearchPreferences
 
 /**
  * Phase 1.1: Manual DI container (Hilt alternative without Gradle plugin classpath issues).
@@ -32,6 +34,9 @@ class AppContainer(private val context: Context) {
     val marketplaceRepository: MarketplaceRepository by lazy {
         MarketplaceRepositoryImpl(marketplaceDao, context.applicationContext)
     }
+
+    val searchPreferences: SearchPreferences by lazy { SearchPreferences(context.applicationContext) }
+    val bookPreferences: BookPreferences by lazy { BookPreferences(context.applicationContext) }
 
     val geminiService: GeminiApiService by lazy { RetrofitClient.service }
 }

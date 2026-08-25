@@ -16,7 +16,10 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 val app = application as AlWahaApplication
                 val viewModel: com.example.ui.viewmodel.MarketplaceViewModel = viewModel(
-                    factory = com.example.ui.viewmodel.MarketplaceViewModel.provideFactory(app.container.marketplaceRepository)
+                    factory = com.example.ui.viewmodel.MarketplaceViewModel.provideFactory(
+                        app.container.marketplaceRepository,
+                        app.container.searchPreferences
+                    )
                 )
                 MarketplaceMainScreen(viewModel = viewModel)
             }

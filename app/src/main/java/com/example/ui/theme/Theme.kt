@@ -26,7 +26,7 @@ private val DarkColorScheme = darkColorScheme(
 private val LightColorScheme = lightColorScheme(
     primary = OasisPrimary,
     secondary = OasisSecondary,
-    tertiary = OasisDarkTeal,
+    tertiary = OasisTertiary,
     background = OasisBackgroundLight,
     surface = OasisSurfaceLight,
     surfaceVariant = OasisSandLight,
@@ -39,7 +39,7 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun MyApplicationTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Disabled to enforce consistent branded Oasis theme !
+    dynamicColor: Boolean = true, // Phase 2.4: enabled opt-in — uses Material You when available, falls back to Oasis palette
     content: @Composable () -> Unit,
 ) {
     val colorScheme = when {

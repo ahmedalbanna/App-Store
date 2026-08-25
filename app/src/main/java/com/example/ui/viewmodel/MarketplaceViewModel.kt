@@ -11,14 +11,17 @@ import com.example.data.api.RetrofitClient
 import androidx.lifecycle.ViewModelProvider
 import com.example.data.database.MarketplaceItem
 import com.example.data.database.MarketplaceRepository
+import com.example.data.datastore.SearchPreferences
 import com.example.ui.navigation.MarketplaceTab
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -31,15 +34,19 @@ data class ChatMessage(
 )
 
 class MarketplaceViewModel(
-    private val repository: MarketplaceRepository
+    private val repository: MarketplaceRepository,
+    private val searchPreferences: SearchPreferences? = null
 ) : ViewModel() {
 
     companion object {
-        fun provideFactory(repository: MarketplaceRepository): ViewModelProvider.Factory =
+        fun provideFactory(
+            repository: MarketplaceRepository,
+            searchPreferences: SearchPreferences? = null
+        ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                    return MarketplaceViewModel(repository) as T
+                    return MarketplaceViewModel(repository, searchPreferences) as T
                 }
             }
     }
@@ -56,6 +63,20 @@ class MarketplaceViewModel(
     // Query for generic app search
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    // Phase 2.2: Debounced query (300ms) for filtering, keeps UI immediate but DB filtering debounced
+    @OptIn(FlowPreview::class)
+    private val _debouncedQuery: StateFlow<String> = _searchQuery
+        .debounce(300)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    // Exposed debounced for UI highlight (still use _searchQuery for input, debounced for list)
+    val debouncedQuery: StateFlow<String> = _debouncedQuery
+
+    // Recent queries via DataStore (Phase 2.2)
+    val recentQueries: StateFlow<List<String>> = searchPreferences?.recentQueries
+        ?.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        ?: MutableStateFlow(emptyList())
 
     // Chosen item details card (for overlay sheets)
     private val _selectedItem = MutableStateFlow<MarketplaceItem?>(null)
@@ -110,8 +131,8 @@ class MarketplaceViewModel(
         .filter { it.itemType != null }
         .associate { it.route to it.itemType!! }
 
-    // Combined Flow for filtering results with Search Box
-    val filteredItems: StateFlow<List<MarketplaceItem>> = combine(allItems, searchQuery, currentTab) { list, query, tab ->
+    // Combined Flow for filtering results with Search Box — Phase 2.2 uses debounced query + category/creator filter
+    val filteredItems: StateFlow<List<MarketplaceItem>> = combine(allItems, _debouncedQuery, currentTab) { list, query, tab ->
         var res = list
         when {
             tab == "LIBRARY" -> {
@@ -135,7 +156,9 @@ class MarketplaceViewModel(
             res = res.filter {
                 it.titleAr.contains(query, ignoreCase = true) ||
                 it.titleEn.contains(query, ignoreCase = true) ||
-                it.descriptionAr.contains(query, ignoreCase = true)
+                it.descriptionAr.contains(query, ignoreCase = true) ||
+                it.category.contains(query, ignoreCase = true) ||
+                it.developerOrCreatorAr.contains(query, ignoreCase = true)
             }
         }
         res
@@ -186,6 +209,19 @@ class MarketplaceViewModel(
 
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
+    }
+
+    fun onSearchSubmitted(query: String) {
+        if (query.isBlank()) return
+        viewModelScope.launch {
+            searchPreferences?.saveQuery(query.trim())
+        }
+    }
+
+    fun clearRecentQueries() {
+        viewModelScope.launch {
+            searchPreferences?.clearRecents()
+        }
     }
 
     fun selectItem(item: MarketplaceItem?) {
