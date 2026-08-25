@@ -12,6 +12,7 @@ import com.example.data.api.RetrofitClient
 import com.example.data.database.ChatDao
 import com.example.data.database.ChatMessageEntity
 import com.example.data.database.MarketplaceItem
+import com.example.data.auth.AuthRepository
 import com.example.data.database.MarketplaceRepository
 import com.example.data.datastore.SearchPreferences
 import com.example.data.rag.RagRetriever
@@ -45,7 +46,8 @@ class MarketplaceViewModel(
     private val repository: MarketplaceRepository,
     private val searchPreferences: SearchPreferences? = null,
     private val chatDao: ChatDao? = null,
-    private val telemetry: Telemetry? = null
+    private val telemetry: Telemetry? = null,
+    private val authRepository: AuthRepository? = null
 ) : ViewModel() {
 
     companion object {
@@ -53,12 +55,13 @@ class MarketplaceViewModel(
             repository: MarketplaceRepository,
             searchPreferences: SearchPreferences? = null,
             chatDao: ChatDao? = null,
-            telemetry: Telemetry? = null
+            telemetry: Telemetry? = null,
+            authRepository: AuthRepository? = null
         ): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
-                    return MarketplaceViewModel(repository, searchPreferences, chatDao, telemetry) as T
+                    return MarketplaceViewModel(repository, searchPreferences, chatDao, telemetry, authRepository) as T
                 }
             }
     }
@@ -95,14 +98,44 @@ class MarketplaceViewModel(
     val allItems: StateFlow<List<MarketplaceItem>> = repository.allItems
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // Phase 4.1/4.3: Remote sync + updates
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+    private val _availableUpdates = MutableStateFlow<List<MarketplaceItem>>(emptyList())
+    val availableUpdates: StateFlow<List<MarketplaceItem>> = _availableUpdates.asStateFlow()
+    val hasUpdates: StateFlow<Boolean> = _availableUpdates.map { it.isNotEmpty() }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     init {
         viewModelScope.launch {
             repository.checkAndPrepulateDatabase()
+            // Phase 4.2: Auth — anonymous sign-in (best effort)
+            try {
+                authRepository?.signInAnonymously()
+            } catch (e: Exception) {
+                Log.w("MarketplaceViewModel", "Auth sign-in failed: ${e.message}")
+            }
+            // Phase 4.1: Remote sync (Room as cache, Retrofit as remote) — best effort, keeps local seed if offline
+            _isSyncing.value = true
+            try {
+                repository.syncRemoteCatalog()
+            } catch (e: Exception) {
+                Log.w("MarketplaceViewModel", "Remote sync failed: ${e.message}")
+            } finally {
+                _isSyncing.value = false
+            }
+            // Phase 4.3: Check for updates after sync
+            try {
+                _availableUpdates.value = repository.checkForUpdates()
+                if (_availableUpdates.value.isNotEmpty()) {
+                    Log.d("MarketplaceViewModel", "Updates available: ${_availableUpdates.value.size}")
+                }
+            } catch (e: Exception) {
+                Log.e("MarketplaceViewModel", "checkForUpdates failed: ${e.message}")
+            }
         }
         // Phase 3.3: Load persisted chat history if available, else keep welcome message
         viewModelScope.launch {
             chatDao?.let { dao ->
-                // Ensure at least welcome message exists
                 if (dao.getCount() == 0) {
                     dao.insertMessage(ChatMessageEntity(sender = "AI", text = "مرحباً بك في متجر الواحة! أنا مساعدك الذكي لتصفح التطبيقات وقراءة واقتراح محتوى تفريحي رائع. كيف يمكنني مساعدتك اليوم؟"))
                 }
@@ -112,6 +145,21 @@ class MarketplaceViewModel(
             }
         }
         GeminiConfig.logStatus()
+    }
+
+    fun refreshCatalog() {
+        viewModelScope.launch {
+            _isSyncing.value = true
+            repository.syncRemoteCatalog()
+            _availableUpdates.value = repository.checkForUpdates()
+            _isSyncing.value = false
+        }
+    }
+
+    fun checkForUpdatesNow() {
+        viewModelScope.launch {
+            _availableUpdates.value = repository.checkForUpdates()
+        }
     }
 
     val appsList: StateFlow<List<MarketplaceItem>> = allItems.map { it.filter { it.type == "APP" } }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -220,6 +268,14 @@ class MarketplaceViewModel(
             val currentSelected = _selectedItem.value
             if (currentSelected != null && currentSelected.id == item.id) {
                 _selectedItem.value = currentSelected.copy(isBookmarked = !currentSelected.isBookmarked)
+            }
+            // Phase 4.2: Sync library to cloud
+            try {
+                val bookmarked = try { bookmarkedList.first().map { it.id } } catch (e: Exception) { emptyList() }
+                val downloaded = try { downloadedList.first().map { it.id } } catch (e: Exception) { emptyList() }
+                authRepository?.syncLibraryToCloud(bookmarked, downloaded)
+            } catch (e: Exception) {
+                Log.w("MarketplaceViewModel", "Library sync failed: ${e.message}")
             }
         }
     }

@@ -132,5 +132,8 @@ class MarketplaceViewModelHiltTest {
         override suspend fun saveBookProgress(itemId: String, lastPage: Int) {}
         override fun cancelDownload(itemId: String) { cancelCalledFor.add(itemId) }
         override fun cancelAllDownloads() {}
+        override suspend fun syncRemoteCatalog(): Result<Unit> = Result.success(Unit)
+        override fun getPagedItems(type: String?): Flow<androidx.paging.PagingData<MarketplaceItem>> = kotlinx.coroutines.flow.flowOf(androidx.paging.PagingData.empty())
+        override suspend fun checkForUpdates(): List<MarketplaceItem> = emptyList()
     }
 }

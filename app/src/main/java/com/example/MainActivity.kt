@@ -20,7 +20,8 @@ class MainActivity : ComponentActivity() {
                         app.container.marketplaceRepository,
                         app.container.searchPreferences,
                         app.container.chatDao,
-                        app.container.telemetry
+                        app.container.telemetry,
+                        app.container.authRepository
                     )
                 )
                 MarketplaceMainScreen(viewModel = viewModel)

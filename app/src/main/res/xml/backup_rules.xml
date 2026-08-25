@@ -1,13 +1,14 @@
-<?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
--->
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Phase 4.2: Explicit backup rules — include marketplace DB & DataStore, exclude cache -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <include domain="database" path="alwaha_marketplace_db" />
+    <include domain="database" path="alwaha_marketplace_db-shm" />
+    <include domain="database" path="alwaha_marketplace_db-wal" />
+    <include domain="sharedpref" path="search_prefs.preferences_pb" />
+    <include domain="sharedpref" path="book_prefs.preferences_pb" />
+    <include domain="sharedpref" path="telemetry_prefs.preferences_pb" />
+    <include domain="sharedpref" path="." />
+    <exclude domain="file" path="gms_tmp/" />
+    <exclude domain="cache" path="." />
+    <exclude domain="external" path="." />
 </full-backup-content>

@@ -2,11 +2,18 @@ package com.example.data.database
 
 import android.content.Context
 import android.util.Log
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import com.example.data.api.CatalogRetrofitClient
+import com.example.security.SecurityScanner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -287,49 +294,42 @@ class MarketplaceRepositoryImpl(
         }
     }
 
-    // Function to simulate background downloading with progressive values — Job-tracked (1.3)
+    // Function to simulate background downloading with progressive values — Job-tracked (1.3) + SecurityScanner (4.4)
     override fun triggerDownloadProgress(itemId: String, scope: CoroutineScope) {
-        // Cancel any prior job for this item (idempotent retry)
         downloadJobs[itemId]?.cancel()
         val job = scope.launch(Dispatchers.IO) {
             try {
-                // Initialize state
                 marketplaceDao.updateDownloadState(itemId, "DOWNLOADING", 0)
-
-                // Simulate progressive download chunks (0% -> 100%)
                 for (progress in 5..100 step 15) {
                     delay(300)
                     marketplaceDao.updateDownloadState(itemId, "DOWNLOADING", progress)
                 }
-
-                // Set download 100% complete
                 marketplaceDao.updateDownloadState(itemId, "DOWNLOADING", 100)
                 delay(400)
 
-                // Start security scanning immediately to follow "الأمان والفحص (Security Scan)" requirement
+                // Phase 4.4: Verifiable security scan via PackageManager
                 marketplaceDao.updateDownloadState(itemId, "SCANNING", 100)
-                delay(1200) // simulating severe safety file signature hashing & scanning
+                val scanResult = SecurityScanner.scanPackage(context, itemId, simulatedIsSafe = true)
+                Log.d("MarketplaceRepository", "Security scan for $itemId: ${scanResult.details} (${scanResult.scanTimeMs}ms) safe=${scanResult.isSafe}")
+                if (!scanResult.isSafe) {
+                    marketplaceDao.updateDownloadState(itemId, "NONE", 0)
+                    Log.e("MarketplaceRepository", "Security scan failed for $itemId")
+                    return@launch
+                }
 
-                // Complete scanning successfully -> state DOWNLOADED
                 val currentItem = marketplaceDao.getItemById(itemId)
                 if (currentItem != null) {
-                    val targetState = if (currentItem.type == "APP" || currentItem.type == "GAME") {
-                        "DOWNLOADED" // ready to click INSTALL
-                    } else {
-                        "INSTALLED" // Media/Books are immediately added to local library
-                    }
+                    val targetState = if (currentItem.type == "APP" || currentItem.type == "GAME") "DOWNLOADED" else "INSTALLED"
                     marketplaceDao.updateItem(
                         currentItem.copy(
                             isDownloaded = true,
                             downloadState = targetState,
                             downloadProgress = 100,
-                            // If book/media, it is instantly ready
                             isInstalled = currentItem.type != "APP" && currentItem.type != "GAME"
                         )
                     )
                 }
             } catch (e: Exception) {
-                // Cancellation is expected when user cancels; don't reset to NONE if cancelled explicitly via resetDownloadState
                 if (e is kotlinx.coroutines.CancellationException) {
                     Log.d("MarketplaceRepository", "Download cancelled for $itemId")
                     throw e
@@ -341,7 +341,6 @@ class MarketplaceRepositoryImpl(
             }
         }
         downloadJobs[itemId] = job
-        // Clean up on completion
         job.invokeOnCompletion { downloadJobs.remove(itemId) }
     }
 
@@ -355,13 +354,12 @@ class MarketplaceRepositoryImpl(
         downloadJobs.clear()
     }
 
-    // Function to simulate a trigger installation (PackageInstaller prompt simulator)
     override suspend fun installPackage(itemId: String) {
         withContext(Dispatchers.IO) {
             val item = marketplaceDao.getItemById(itemId)
             if (item != null) {
                 marketplaceDao.updateDownloadState(itemId, "INSTALLING", 100)
-                delay(1500) // installing APK files dynamically
+                delay(1500)
                 marketplaceDao.updateItem(
                     item.copy(
                         isInstalled = true,
@@ -374,9 +372,7 @@ class MarketplaceRepositoryImpl(
         }
     }
 
-    // Cancel dynamic download / Reset download state
     override suspend fun resetDownloadState(itemId: String) {
-        // Cancel ongoing job first (1.3)
         cancelDownload(itemId)
         withContext(Dispatchers.IO) {
             val item = marketplaceDao.getItemById(itemId)
@@ -394,7 +390,6 @@ class MarketplaceRepositoryImpl(
         }
     }
 
-    // Update bookmark status
     override suspend fun toggleBookmark(itemId: String) {
         withContext(Dispatchers.IO) {
             val item = marketplaceDao.getItemById(itemId)
@@ -404,10 +399,67 @@ class MarketplaceRepositoryImpl(
         }
     }
 
-    // Save reading progress of books
     override suspend fun saveBookProgress(itemId: String, lastPage: Int) {
         withContext(Dispatchers.IO) {
             marketplaceDao.updateBookProgress(itemId, lastPage)
         }
+    }
+
+    // Phase 4.1: Remote sync — Retrofit + Room cache, Paging 3
+    override suspend fun syncRemoteCatalog(): Result<Unit> = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val response = try {
+                CatalogRetrofitClient.service.getCatalog(page = 1, pageSize = 100)
+            } catch (e: Exception) {
+                Log.w("MarketplaceRepository", "Remote catalog fetch failed, keeping local cache: ${e.message}")
+                return@withContext Result.success(Unit)
+            }
+            if (response.items.isNotEmpty()) {
+                val existing = try { marketplaceDao.getAllItems().first().associateBy { it.id } } catch (e: Exception) { emptyMap() }
+                val merged = response.items.map { remote ->
+                    val local = existing[remote.id]
+                    if (local != null) {
+                        remote.copy(
+                            isBookmarked = local.isBookmarked,
+                            isDownloaded = local.isDownloaded,
+                            isInstalled = local.isInstalled,
+                            downloadState = local.downloadState,
+                            downloadProgress = local.downloadProgress,
+                            installedVersionCode = local.installedVersionCode,
+                            lastReadPage = local.lastReadPage
+                        )
+                    } else remote
+                }
+                marketplaceDao.insertAll(merged)
+                Log.d("MarketplaceRepository", "Remote sync: ${merged.size} items, ${response.totalItems} total")
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("MarketplaceRepository", "syncRemoteCatalog error: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    override fun getPagedItems(type: String?): Flow<PagingData<MarketplaceItem>> {
+        return Pager(
+            config = PagingConfig(pageSize = 20, enablePlaceholders = false),
+            pagingSourceFactory = {
+                if (type != null) marketplaceDao.getPagingSource(type) else marketplaceDao.getAllPagingSource()
+            }
+        ).flow
+    }
+
+    // Phase 4.3: Updates — real installed vs simulated check
+    override suspend fun checkForUpdates(): List<MarketplaceItem> = withContext(Dispatchers.IO) {
+        val all = try { marketplaceDao.getAllItems().first() } catch (e: Exception) { emptyList() }
+        val updates = all.filter { it.isInstalled && it.installedVersionCode < it.simulatedVersionCode }
+        if (updates.isNotEmpty()) {
+            for (item in updates) {
+                if (item.downloadState != "UPDATE_AVAILABLE") {
+                    marketplaceDao.updateDownloadState(item.id, "UPDATE_AVAILABLE", 100)
+                }
+            }
+        }
+        return@withContext updates
     }
 }

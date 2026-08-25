@@ -136,6 +136,8 @@ fun MarketBarHeader(viewModel: MarketplaceViewModel) {
     val currentTab by viewModel.currentTab.collectAsState()
     val downloadedItems by viewModel.downloadedList.collectAsState()
     val count = downloadedItems.filter { it.downloadState == "DOWNLOADING" }.size
+    val hasUpdates by viewModel.hasUpdates.collectAsState()
+    val isSyncing by viewModel.isSyncing.collectAsState()
 
     Row(
         modifier = Modifier
@@ -185,7 +187,7 @@ fun MarketBarHeader(viewModel: MarketplaceViewModel) {
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
-            // Library shortcut badge with downloading indicator
+            // Library shortcut badge with downloading + updates + syncing indicators (Phase 4.3/4.1)
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -203,12 +205,27 @@ fun MarketBarHeader(viewModel: MarketplaceViewModel) {
                     contentDescription = "المكتبة وتنزيلات المحتوى",
                     tint = MaterialTheme.colorScheme.primary
                 )
-                if (count > 0) {
+                if (isSyncing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(48.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else if (count > 0) {
                     Box(
                         modifier = Modifier
                             .size(10.dp)
                             .clip(CircleShape)
                             .background(Color.Red)
+                            .align(Alignment.TopEnd)
+                            .offset(x = (-4).dp, y = 4.dp)
+                    )
+                } else if (hasUpdates) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1E88E5))
                             .align(Alignment.TopEnd)
                             .offset(x = (-4).dp, y = 4.dp)
                     )
@@ -385,8 +402,8 @@ fun DashboardGridScreen(viewModel: MarketplaceViewModel) {
     val searchQuery by viewModel.searchQuery.collectAsState()
     val recentQueries by viewModel.recentQueries.collectAsState()
     val allItems by viewModel.allItems.collectAsState()
-    val scope = rememberCoroutineScope()
-    var isRefreshing by remember { mutableStateOf(false) }
+    val isSyncing by viewModel.isSyncing.collectAsState()
+    val hasUpdates by viewModel.hasUpdates.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Search Bar — debounced in VM (300ms), filters by title/category/creator, saves recents on Done
@@ -521,16 +538,10 @@ fun DashboardGridScreen(viewModel: MarketplaceViewModel) {
                 }
             }
         } else {
-            // Phase 2.4: Pull-to-refresh
+            // Phase 4.1: Pull-to-refresh now triggers remote sync (Room cache + Retrofit)
             PullToRefreshBox(
-                isRefreshing = isRefreshing,
-                onRefresh = {
-                    scope.launch {
-                        isRefreshing = true
-                        delay(900)
-                        isRefreshing = false
-                    }
-                },
+                isRefreshing = isSyncing,
+                onRefresh = { viewModel.refreshCatalog() },
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -543,6 +554,40 @@ fun DashboardGridScreen(viewModel: MarketplaceViewModel) {
                     if (searchQuery.isEmpty()) {
                         item {
                             FeaturedHeroCard(currentTab = currentTab)
+                        }
+                    }
+
+                    // Phase 4.3: Updates banner
+                    if (hasUpdates && searchQuery.isEmpty()) {
+                        item {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.changeTab("LIBRARY") }
+                                    .testTag("updates_banner"),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Icon(Icons.Filled.SystemUpdate, contentDescription = "تحديثات", tint = Color(0xFF1565C0))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "تحديثات متوفرة لمكتبتك",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp,
+                                            color = Color(0xFF0D47A1)
+                                        )
+                                    }
+                                    TextButton(onClick = { viewModel.changeTab("LIBRARY") }) {
+                                        Text("عرض", fontSize = 12.sp)
+                                    }
+                                }
+                            }
                         }
                     }
 

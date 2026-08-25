@@ -4,8 +4,12 @@ import android.content.Context
 import androidx.room.Room
 import com.example.data.api.GeminiApiService
 import com.example.data.api.RetrofitClient
+import com.example.data.api.CatalogApiService
+import com.example.data.api.CatalogRetrofitClient
+import com.example.data.auth.AuthRepository
 import com.example.data.database.AppDatabase
 import com.example.data.database.MARKETPLACE_DB_MIGRATION_1_2
+import com.example.data.database.MARKETPLACE_DB_MIGRATION_2_3
 import com.example.data.database.MarketplaceDao
 import com.example.data.database.MarketplaceRepository
 import com.example.data.database.MarketplaceRepositoryImpl
@@ -26,7 +30,7 @@ class AppContainer(private val context: Context) {
             AppDatabase::class.java,
             "alwaha_marketplace_db"
         )
-            .addMigrations(MARKETPLACE_DB_MIGRATION_1_2)
+            .addMigrations(MARKETPLACE_DB_MIGRATION_1_2, MARKETPLACE_DB_MIGRATION_2_3)
             .build()
     }
 
@@ -40,6 +44,8 @@ class AppContainer(private val context: Context) {
     val bookPreferences: BookPreferences by lazy { BookPreferences(context.applicationContext) }
     val chatDao by lazy { database.chatDao() }
     val telemetry: Telemetry by lazy { Telemetry(context.applicationContext) }
+    val authRepository: AuthRepository by lazy { AuthRepository() }
+    val catalogApi: CatalogApiService by lazy { CatalogRetrofitClient.service }
 
     val geminiService: GeminiApiService by lazy { RetrofitClient.service }
 }

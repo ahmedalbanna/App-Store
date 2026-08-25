@@ -27,11 +27,21 @@ interface MarketplaceDao {
     @Query("SELECT COUNT(*) FROM marketplace_items")
     suspend fun getItemCount(): Int
 
+    @Query("DELETE FROM marketplace_items")
+    suspend fun clearAll()
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(items: List<MarketplaceItem>)
 
     @Update
     suspend fun updateItem(item: MarketplaceItem)
+
+    // Paging support (Phase 4.1)
+    @Query("SELECT * FROM marketplace_items WHERE type = :type ORDER BY rating DESC")
+    fun getPagingSource(type: String): androidx.paging.PagingSource<Int, MarketplaceItem>
+
+    @Query("SELECT * FROM marketplace_items ORDER BY rating DESC")
+    fun getAllPagingSource(): androidx.paging.PagingSource<Int, MarketplaceItem>
 
     @Query("UPDATE marketplace_items SET downloadState = :state, downloadProgress = :progress WHERE id = :id")
     suspend fun updateDownloadState(id: String, state: String, progress: Int)

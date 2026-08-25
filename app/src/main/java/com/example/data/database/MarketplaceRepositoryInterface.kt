@@ -1,5 +1,6 @@
 package com.example.data.database
 
+import androidx.paging.PagingData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 
@@ -31,4 +32,11 @@ interface MarketplaceRepository {
 
     /** For testing / cleanup */
     fun cancelAllDownloads()
+
+    // Phase 4.1: Remote sync — Room as cache, Retrofit as remote, Paging 3
+    suspend fun syncRemoteCatalog(): Result<Unit>
+    fun getPagedItems(type: String? = null): Flow<PagingData<MarketplaceItem>>
+
+    // Phase 4.3: Updates — check installed vs simulated
+    suspend fun checkForUpdates(): List<MarketplaceItem>
 }
